@@ -1,6 +1,8 @@
+
 import React, { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { X, Plus, Trash2, Book, MapPin, Users } from 'lucide-react'
+import { motion } from 'framer-motion'
+import { X, Users, MapPin, Upload, FileText, CheckCircle, AlertCircle, Download } from 'lucide-react'
+import Papa from 'papaparse'
 
 const LanguageForm = ({ language, onSubmit, onCancel, loading }) => {
   const [formData, setFormData] = useState({
@@ -21,16 +23,13 @@ const LanguageForm = ({ language, onSubmit, onCancel, loading }) => {
     future: '',
     speakers: '',
     location: '',
-    description: '',
-    dictionary: [{
-      word: '',
-      meaning: '',
-      pronunciation: '',
-      region: '',
-      example: '',
-      dialects: ['']
-    }]
+    description: ''
   })
+
+  const [csvFile, setCsvFile] = useState(null)
+  const [csvData, setCsvData] = useState([])
+  const [csvStatus, setCsvStatus] = useState({ type: '', message: '' })
+  const [isDragOver, setIsDragOver] = useState(false)
 
   useEffect(() => {
     if (language) {
@@ -52,16 +51,17 @@ const LanguageForm = ({ language, onSubmit, onCancel, loading }) => {
         future: language.future || '',
         speakers: language.speakers || '',
         location: language.location || '',
-        description: language.description || '',
-        dictionary: language.dictionary || [{
-          word: '',
-          meaning: '',
-          pronunciation: '',
-          region: '',
-          example: '',
-          dialects: ['']
-        }]
+        description: language.description || ''
       })
+      
+      // If editing and has dictionary, show it as imported
+      if (language.dictionary && language.dictionary.length > 0) {
+        setCsvData(language.dictionary)
+        setCsvStatus({ 
+          type: 'success', 
+          message: `${language.dictionary.length} words loaded from existing data` 
+        })
+      }
     }
   }, [language])
 
@@ -84,76 +84,146 @@ const LanguageForm = ({ language, onSubmit, onCancel, loading }) => {
     }))
   }
 
-  // Dictionary handlers
-  const handleDictionaryChange = (index, field, value) => {
-    const updatedDictionary = [...formData.dictionary]
-    updatedDictionary[index] = {
-      ...updatedDictionary[index],
-      [field]: value
+  const handleFileSelect = (e) => {
+    const file = e.target.files[0]
+    if (file) {
+      processCSV(file)
     }
-    setFormData(prev => ({
-      ...prev,
-      dictionary: updatedDictionary
-    }))
   }
 
-  const handleDialectChange = (dictIndex, dialectIndex, value) => {
-    const updatedDictionary = [...formData.dictionary]
-    const updatedDialects = [...updatedDictionary[dictIndex].dialects]
-    updatedDialects[dialectIndex] = value
-    updatedDictionary[dictIndex].dialects = updatedDialects
-    setFormData(prev => ({
-      ...prev,
-      dictionary: updatedDictionary
-    }))
+  const handleDragOver = (e) => {
+    e.preventDefault()
+    setIsDragOver(true)
   }
 
-  const addDictionaryEntry = () => {
-    setFormData(prev => ({
-      ...prev,
-      dictionary: [
-        ...prev.dictionary,
-        {
-          word: '',
-          meaning: '',
-          pronunciation: '',
-          region: '',
-          example: '',
-          dialects: ['']
+  const handleDragLeave = (e) => {
+    e.preventDefault()
+    setIsDragOver(false)
+  }
+
+  const handleDrop = (e) => {
+    e.preventDefault()
+    setIsDragOver(false)
+    
+    const file = e.dataTransfer.files[0]
+    if (file && file.name.endsWith('.csv')) {
+      processCSV(file)
+    } else {
+      setCsvStatus({ type: 'error', message: 'Please upload a CSV file' })
+    }
+  }
+
+  const processCSV = (file) => {
+    setCsvFile(file)
+    setCsvStatus({ type: 'loading', message: 'Processing CSV file...' })
+
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: (header) => header.trim(),
+      complete: (results) => {
+        if (results.errors.length > 0) {
+          setCsvStatus({ 
+            type: 'error', 
+            message: `CSV parsing errors: ${results.errors[0].message}` 
+          })
+          return
         }
-      ]
-    }))
+
+        // Validate required columns
+        const requiredColumns = ['word', 'meaning']
+        const headers = results.meta.fields.map(f => f.toLowerCase())
+        const missingColumns = requiredColumns.filter(col => !headers.includes(col))
+
+        if (missingColumns.length > 0) {
+          setCsvStatus({ 
+            type: 'error', 
+            message: `Missing required columns: ${missingColumns.join(', ')}` 
+          })
+          return
+        }
+
+        // Transform CSV data to match dictionary structure
+        const transformedData = results.data.map((row, index) => {
+          // Parse dialects from comma-separated string or array
+          let dialects = ['']
+          if (row.dialects) {
+            if (typeof row.dialects === 'string') {
+              dialects = row.dialects.split(',').map(d => d.trim()).filter(d => d)
+            } else if (Array.isArray(row.dialects)) {
+              dialects = row.dialects.filter(d => d)
+            }
+          }
+          if (dialects.length === 0) dialects = ['']
+
+          return {
+            word: row.word || '',
+            meaning: row.meaning || '',
+            pronunciation: row.pronunciation || '',
+            region: row.region || '',
+            example: row.example || '',
+            dialects: dialects
+          }
+        }).filter(entry => entry.word && entry.meaning) // Filter out invalid entries
+
+        if (transformedData.length === 0) {
+          setCsvStatus({ 
+            type: 'error', 
+            message: 'No valid entries found in CSV. Ensure word and meaning columns are filled.' 
+          })
+          return
+        }
+
+        setCsvData(transformedData)
+        setCsvStatus({ 
+          type: 'success', 
+          message: `Successfully imported ${transformedData.length} words from CSV` 
+        })
+      },
+      error: (error) => {
+        setCsvStatus({ 
+          type: 'error', 
+          message: `Error reading CSV: ${error.message}` 
+        })
+      }
+    })
   }
 
-  const removeDictionaryEntry = (index) => {
-    const updatedDictionary = formData.dictionary.filter((_, i) => i !== index)
-    setFormData(prev => ({
-      ...prev,
-      dictionary: updatedDictionary
-    }))
-  }
-
-  const addDialectField = (dictIndex) => {
-    const updatedDictionary = [...formData.dictionary]
-    updatedDictionary[dictIndex].dialects.push('')
-    setFormData(prev => ({
-      ...prev,
-      dictionary: updatedDictionary
-    }))
-  }
-
-  const removeDialectField = (dictIndex, dialectIndex) => {
-    const updatedDictionary = [...formData.dictionary]
-    updatedDictionary[dictIndex].dialects = updatedDictionary[dictIndex].dialects.filter((_, i) => i !== dialectIndex)
-    setFormData(prev => ({
-      ...prev,
-      dictionary: updatedDictionary
-    }))
+  const downloadTemplate = () => {
+    const template = `word,meaning,pronunciation,region,example,dialects
+Salam,Hello/Peace,sa-laam,Punjab,Used as a common greeting,"Multani: salamat, Lahori: salaam"
+Mehrbani,Kindness,mehr-ba-nee,Sindh,Show mehrbani to others,"Sindhi: mehrbano"
+Adab,Respect,aa-dab,Federal,A formal greeting,""
+`
+    
+    const blob = new Blob([template], { type: 'text/csv' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'dictionary_template.csv'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
   }
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    onSubmit(formData)
+    
+    // Combine form data with CSV dictionary data
+    const completeData = {
+      ...formData,
+      dictionary: csvData.length > 0 ? csvData : [{
+        word: '',
+        meaning: '',
+        pronunciation: '',
+        region: '',
+        example: '',
+        dialects: ['']
+      }]
+    }
+    
+    onSubmit(completeData)
   }
 
   const regions = ['Punjab', 'Sindh', 'Khyber Pakhtunkhwa', 'Balochistan', 'Gilgit-Baltistan', 'Azad Kashmir', 'Federal']
@@ -180,7 +250,7 @@ const LanguageForm = ({ language, onSubmit, onCancel, loading }) => {
               {language ? 'Edit Language' : 'Add New Language'}
             </h2>
             <p className="text-blue-100 mt-1">
-              {language ? 'Update language information and dictionary' : 'Add a new language to the database'}
+              {language ? 'Update language information and upload dictionary CSV' : 'Add language details and import dictionary from CSV'}
             </p>
           </div>
           <button
@@ -333,133 +403,103 @@ const LanguageForm = ({ language, onSubmit, onCancel, loading }) => {
               </div>
             </div>
 
-            {/* Dictionary Section */}
+            {/* CSV Dictionary Upload */}
             <div className="bg-white rounded-lg border border-gray-200 p-6">
-              <div className="flex justify-between items-center mb-6">
+              <div className="flex justify-between items-center mb-4">
                 <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                  <Book size={20} />
-                  Dictionary ({formData.dictionary.length} words)
+                  <FileText size={20} />
+                  Dictionary (CSV Upload)
                 </h3>
-                <motion.button
+                <button
                   type="button"
-                  onClick={addDictionaryEntry}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-semibold transition-colors"
+                  onClick={downloadTemplate}
+                  className="flex items-center gap-2 text-blue-600 hover:text-blue-800 text-sm font-medium"
                 >
-                  <Plus size={16} />
-                  Add Word
-                </motion.button>
+                  <Download size={16} />
+                  Download Template
+                </button>
               </div>
 
-              <div className="space-y-4">
-                {formData.dictionary.map((entry, dictIndex) => (
-                  <div key={dictIndex} className="border border-gray-200 rounded-lg p-6 bg-gray-50 hover:bg-white transition-colors">
-                    <div className="flex justify-between items-start mb-4">
-                      <h4 className="font-semibold text-gray-900">Word #{dictIndex + 1}</h4>
-                      <button
-                        type="button"
-                        onClick={() => removeDictionaryEntry(dictIndex)}
-                        className="text-red-600 hover:text-red-800 p-1 rounded transition-colors"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
+              <div className="mb-4">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                  <h4 className="font-semibold text-blue-900 mb-2">CSV Format Requirements:</h4>
+                  <ul className="text-sm text-blue-800 space-y-1">
+                    <li>• <strong>Required columns:</strong> word, meaning</li>
+                    <li>• <strong>Optional columns:</strong> pronunciation, region, example, dialects</li>
+                    <li>• For dialects, separate multiple values with commas: "Multani: salamat, Lahori: salaam"</li>
+                    <li>• Download the template above to see the exact format</li>
+                  </ul>
+                </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Word *</label>
-                        <input
-                          type="text"
-                          value={entry.word}
-                          onChange={(e) => handleDictionaryChange(dictIndex, 'word', e.target.value)}
-                          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          required
-                          placeholder="e.g., Salam"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Meaning *</label>
-                        <input
-                          type="text"
-                          value={entry.meaning}
-                          onChange={(e) => handleDictionaryChange(dictIndex, 'meaning', e.target.value)}
-                          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          required
-                          placeholder="e.g., Hello, Peace"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Pronunciation</label>
-                        <input
-                          type="text"
-                          value={entry.pronunciation}
-                          onChange={(e) => handleDictionaryChange(dictIndex, 'pronunciation', e.target.value)}
-                          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          placeholder="e.g., sa-laam"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Specific Region</label>
-                        <select
-                          value={entry.region}
-                          onChange={(e) => handleDictionaryChange(dictIndex, 'region', e.target.value)}
-                          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        >
-                          <option value="">All Regions</option>
-                          {regions.map(region => (
-                            <option key={region} value={region}>{region}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="md:col-span-2">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Example Usage</label>
-                        <input
-                          type="text"
-                          value={entry.example}
-                          onChange={(e) => handleDictionaryChange(dictIndex, 'example', e.target.value)}
-                          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          placeholder="e.g., Used as a common greeting"
-                        />
-                      </div>
-                    </div>
+                <div
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+                    isDragOver 
+                      ? 'border-blue-500 bg-blue-50' 
+                      : 'border-gray-300 hover:border-blue-400 bg-gray-50'
+                  }`}
+                >
+                  <Upload size={48} className="mx-auto mb-4 text-gray-400" />
+                  <p className="text-gray-600 mb-2">
+                    Drag and drop your CSV file here, or
+                  </p>
+                  <label className="inline-block">
+                    <input
+                      type="file"
+                      accept=".csv"
+                      onChange={handleFileSelect}
+                      className="hidden"
+                    />
+                    <span className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer inline-block transition-colors">
+                      Browse Files
+                    </span>
+                  </label>
+                  {csvFile && (
+                    <p className="text-sm text-gray-600 mt-3">
+                      Selected: {csvFile.name}
+                    </p>
+                  )}
+                </div>
 
-                    {/* Dialects */}
-                    <div className="mb-4">
-                      <div className="flex justify-between items-center mb-3">
-                        <label className="block text-sm font-medium text-gray-700">Dialect Variations</label>
-                        <button
-                          type="button"
-                          onClick={() => addDialectField(dictIndex)}
-                          className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm font-medium"
-                        >
-                          <Plus size={14} />
-                          Add Dialect
-                        </button>
-                      </div>
-                      <div className="space-y-2">
-                        {entry.dialects.map((dialect, dialectIndex) => (
-                          <div key={dialectIndex} className="flex gap-2">
-                            <input
-                              type="text"
-                              value={dialect}
-                              onChange={(e) => handleDialectChange(dictIndex, dialectIndex, e.target.value)}
-                              className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                              placeholder="e.g., Multani dialect: saraaki, Mianwali dialect: saraiki"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => removeDialectField(dictIndex, dialectIndex)}
-                              className="px-3 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
+                {/* Status Messages */}
+                {csvStatus.message && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className={`mt-4 p-4 rounded-lg flex items-start gap-3 ${
+                      csvStatus.type === 'success' 
+                        ? 'bg-green-50 border border-green-200' 
+                        : csvStatus.type === 'error'
+                        ? 'bg-red-50 border border-red-200'
+                        : 'bg-blue-50 border border-blue-200'
+                    }`}
+                  >
+                    {csvStatus.type === 'success' && <CheckCircle size={20} className="text-green-600 mt-0.5" />}
+                    {csvStatus.type === 'error' && <AlertCircle size={20} className="text-red-600 mt-0.5" />}
+                    {csvStatus.type === 'loading' && (
+                      <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mt-0.5" />
+                    )}
+                    <div className="flex-1">
+                      <p className={`font-medium ${
+                        csvStatus.type === 'success' 
+                          ? 'text-green-900' 
+                          : csvStatus.type === 'error'
+                          ? 'text-red-900'
+                          : 'text-blue-900'
+                      }`}>
+                        {csvStatus.message}
+                      </p>
+                      {csvStatus.type === 'success' && csvData.length > 0 && (
+                        <div className="mt-2 text-sm text-green-800">
+                          Preview: {csvData.slice(0, 3).map(w => w.word).join(', ')}
+                          {csvData.length > 3 && ` ... and ${csvData.length - 3} more`}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  </motion.div>
+                )}
               </div>
             </div>
 

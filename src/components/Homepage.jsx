@@ -1,8 +1,9 @@
+
+
+
 import React from "react";
 import { motion } from "framer-motion";
 import Footer from "./Footer";
-
-const fallingItems = ["📘", "📖", "A", "B", "C", "Ω", "文", "ع", "क"]; // Books + multilingual letters
 
 const HomePage = ({ user, isAdmin, setView }) => {
   return (
@@ -17,30 +18,6 @@ const HomePage = ({ user, isAdmin, setView }) => {
           backgroundBlendMode: "overlay",
         }}
       >
-        {/* Falling Letters/Books */}
-        <div className="absolute inset-0 pointer-events-none overflow-hidden">
-          {fallingItems.map((item, i) => (
-            <motion.span
-              key={i}
-              initial={{ y: -100, opacity: 0 }}
-              animate={{
-                y: "100vh",
-                opacity: [0, 1, 1, 0],
-                x: Math.random() * window.innerWidth,
-              }}
-              transition={{
-                duration: 6 + Math.random() * 4,
-                repeat: Infinity,
-                delay: Math.random() * 5,
-              }}
-              className="absolute text-2xl md:text-3xl opacity-70"
-              style={{ left: `${Math.random() * 100}%` }}
-            >
-              {item}
-            </motion.span>
-          ))}
-        </div>
-
         {/* Hero Content */}
         <motion.div
           initial={{ y: -100, opacity: 0 }}
